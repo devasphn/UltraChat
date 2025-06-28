@@ -5,6 +5,7 @@ import tempfile
 import torchaudio
 import gradio as gr
 from transformers import AutoProcessor, AutoModel
+from chatterbox.tts import ChatterboxTTS
 
 # 1. Ultravox model and processor loading
 try:
