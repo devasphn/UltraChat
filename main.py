@@ -4,12 +4,11 @@ import librosa
 import tempfile
 import torchaudio
 import gradio as gr
-from transformers import AutoProcessor, AutoModelForCausalLM # Corrected import here
+from transformers import AutoProcessor, AutoModel # Changed to AutoModel for generic loading
 from chatterbox.tts import ChatterboxTTS
 
 # 1. Ultravox model and processor loading
-#    - Removed 'task' from pipeline as we're loading directly
-#    - Use AutoProcessor and AutoModelForCausalLM for models based on Llama/causal LMs
+#    - Use AutoProcessor and AutoModel, relying on trust_remote_code for custom model class
 #    - Ensure model is moved to GPU if available and float16 for efficiency
 try:
     device = 0 if torch.cuda.is_available() else "cpu"
@@ -21,7 +20,8 @@ try:
         trust_remote_code=True,
         revision="main"
     )
-    model = AutoModelForCausalLM.from_pretrained( # Changed to AutoModelForCausalLM
+    # Crucial change: Use AutoModel, which will then use the custom class
+    model = AutoModel.from_pretrained(
         "fixie-ai/ultravox-v0_4",
         trust_remote_code=True,
         revision="main",
@@ -31,8 +31,9 @@ try:
 
 except Exception as e:
     print(f"Error loading Ultravox model: {e}")
-    print("Please ensure you have transformers and accelerate installed, and your system has enough memory.")
-    print("If the error persists, check the exact class type required by 'fixie-ai/ultravox-v0_4' in its Hugging Face model code.")
+    print("This often happens if the model's custom code isn't compatible with your Transformers version,")
+    print("or if there's a memory issue, or if the specific AutoModel class isn't correct even with trust_remote_code.")
+    print("Please ensure your transformers library is up to date and your system has enough memory.")
     exit() # Exit if the model cannot be loaded
 
 # 2. Chatterbox TTS loader
@@ -95,6 +96,8 @@ def s2s(audio_path: str) -> str:
     # Generate the output from the model
     with torch.no_grad(): # Disable gradient calculation for inference
         print("Generating response from Ultravox model...")
+        # Note: Depending on the custom model's implementation, the 'generate' arguments
+        # might vary slightly. 'max_new_tokens' is standard for text generation.
         generated_ids = model.generate(**inputs, max_new_tokens=128)
     print("Ultravox model generation complete.")
 
