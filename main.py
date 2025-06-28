@@ -4,7 +4,8 @@ import librosa
 import tempfile
 import torchaudio
 import gradio as gr
-from transformers import AutoProcessor, AutoModel # Keep AutoModel
+from transformers import AutoProcessor, AutoModel
+from chatterbox.tts import ChatterboxTTS # Ensure this import is correct and visible
 
 # 1. Ultravox model and processor loading
 try:
@@ -22,17 +23,13 @@ try:
     print("Ultravox processor loaded successfully.")
 
     # Load the model with device_map="auto" to handle memory placement
-    # This often avoids the "Cannot copy out of meta tensor" error
-    # because Accelerate manages the loading process more robustly.
     model = AutoModel.from_pretrained(
         "fixie-ai/ultravox-v0_4",
         trust_remote_code=True,
         revision="main",
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto" # <--- IMPORTANT: This tells transformers/accelerate to handle device placement
-                          #      This should automatically distribute the model or offload to CPU if needed.
+        device_map="auto" # IMPORTANT: This tells transformers/accelerate to handle device placement
     )
-    # Remove .to(device) here because device_map="auto" already handles model placement.
     print("Ultravox model loaded successfully with device_map='auto'.")
 
 except Exception as e:
@@ -54,6 +51,10 @@ class TTS:
         if self.model is None:
             # Load Chatterbox on the same device
             print(f"Loading Chatterbox TTS on device: {self.device}")
+            # The NameError suggests ChatterboxTTS wasn't properly seen.
+            # It's imported at the top, so this *should* work. If not, it implies
+            # an unusual module loading order or environment issue.
+            # Assuming the top-level import makes ChatterboxTTS available:
             self.model = ChatterboxTTS.from_pretrained(device=self.device)
             print("Chatterbox TTS loaded successfully.")
         return True
@@ -77,10 +78,19 @@ class TTS:
             gc.collect()
         return tmp.name
 
-tts = TTS()
+tts = TTS() # Keep this after the TTS class definition
 
 # 3. Speech-to-speech function
 def s2s(audio_path: str) -> str:
+    # --- FIX FOR "Invalid file: None" ---
+    if audio_path is None:
+        print("No audio input received yet. Waiting for user interaction.")
+        # Return an empty string or a placeholder audio path for initial Gradio setup
+        # or raise a more specific error if an actual audio file is always expected.
+        # For Gradio's initial run, returning None for audio_out is fine.
+        return None # Return None for audio output if no input. Gradio handles this gracefully.
+    # --- END FIX ---
+
     print(f"Processing audio from: {audio_path}")
     # Load user audio at 16 kHz
     audio, sr = librosa.load(audio_path, sr=16000)
@@ -134,6 +144,8 @@ with gr.Blocks(title="UltraChat S2S Agent") as demo:
     audio_in = gr.Audio(sources=["microphone"], type="filepath", label="Your Speech")
     btn = gr.Button("▶️ Talk to AI")
     audio_out = gr.Audio(type="filepath", label="AI Response")
+    # For initial load, set audio_out to None.
+    # The fn=s2s will be called on button click, not immediately for the initial state.
     btn.click(fn=s2s, inputs=audio_in, outputs=audio_out)
 
 if __name__ == "__main__":
