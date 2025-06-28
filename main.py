@@ -4,21 +4,32 @@ import librosa
 import tempfile
 import torchaudio
 import gradio as gr
-from transformers import pipeline
+from transformers import AutoProcessor, AutoModelForConditionalGeneration # Corrected imports
 from chatterbox.tts import ChatterboxTTS
 
-# 1. Ultravox pipeline
-#    - Remove device_map/offload to avoid meta‐tensor errors
-#    - Load full model on CPU then move to GPU via `device=0`
-#    - Use float16 for reduced VRAM footprint
-uv_pipe = pipeline(
-    task="audio-text-to-text",
-    model="fixie-ai/ultravox-v0_4",
-    trust_remote_code=True,
-    revision="main",  
-    device=0,                          # send model to GPU 0 after loading  
-    torch_dtype=torch.float16         # load weights in half precision
-)
+# 1. Ultravox model and processor loading
+#    - Removed 'task' from pipeline as we're loading directly
+#    - Use AutoProcessor and AutoModelForConditionalGeneration
+#    - Ensure model is moved to GPU if available and float16 for efficiency
+try:
+    device = 0 if torch.cuda.is_available() else "cpu"
+    # Load the processor and model
+    processor = AutoProcessor.from_pretrained(
+        "fixie-ai/ultravox-v0_4",
+        trust_remote_code=True,
+        revision="main"
+    )
+    model = AutoModelForConditionalGeneration.from_pretrained(
+        "fixie-ai/ultravox-v0_4",
+        trust_remote_code=True,
+        revision="main",
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32, # Use float16 on GPU, float32 on CPU
+    ).to(device) # Move model to device after loading
+
+except Exception as e:
+    print(f"Error loading Ultravox model: {e}")
+    print("Please ensure you have transformers and accelerate installed, and your system has enough memory.")
+    exit() # Exit if the model cannot be loaded
 
 # 2. Chatterbox TTS loader
 class TTS:
@@ -29,6 +40,7 @@ class TTS:
     def load(self):
         if self.model is None:
             # Load Chatterbox on the same device
+            print(f"Loading Chatterbox TTS on device: {self.device}")
             self.model = ChatterboxTTS.from_pretrained(device=self.device)
         return True
 
@@ -43,7 +55,7 @@ class TTS:
             wav = wav.unsqueeze(0)
         # Save to temporary file
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        torchaudio.save(tmp.name, wav, self.model.sr)
+        torchaudio.save(tmp.name, wav.cpu(), self.model.sr) # Move to CPU before saving to avoid device mismatch issues with torchaudio
         # Clear GPU cache
         if self.device == "cuda":
             torch.cuda.empty_cache()
@@ -56,17 +68,37 @@ tts = TTS()
 def s2s(audio_path: str) -> str:
     # Load user audio at 16 kHz
     audio, sr = librosa.load(audio_path, sr=16000)
-    # Prepare system + user turns
+
+    # Prepare system + user turns for Ultravox
     turns = [
         {"role": "system", "content": "You are a helpful voice assistant."},
-        {"role": "user",   "content": "Please respond to my speech input."}
+        {"role": "user", "content": "Please respond to my speech input."}
     ]
-    # Convert speech → text via Ultravox
-    result = uv_pipe(
-        {"audio": audio, "turns": turns, "sampling_rate": sr},
-        max_new_tokens=128
-    )
-    response_text = result[0]["generated_text"]
+
+    # Process audio and generate text using the loaded model
+    # Ultravox expects audio as a list/tensor and turns.
+    # The 'processor' will handle the correct input formatting.
+    inputs = processor(
+        audio=audio,
+        sampling_rate=sr,
+        turns=turns,
+        return_tensors="pt"
+    ).to(device) # Move inputs to the same device as the model
+
+    # Generate the output from the model
+    with torch.no_grad(): # Disable gradient calculation for inference
+        generated_ids = model.generate(**inputs, max_new_tokens=128)
+
+    # Decode the generated text
+    response_text = processor.decode(generated_ids[0], skip_special_tokens=True)
+
+    # Clean up memory
+    del inputs
+    del generated_ids
+    if device != "cpu":
+        torch.cuda.empty_cache()
+        gc.collect()
+
     # Convert text → speech via Chatterbox
     return tts.synthesize(response_text)
 
