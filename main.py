@@ -32,7 +32,7 @@ def initialize_models():
             trust_remote_code=True,
             device_map="auto",
             torch_dtype=torch.float16,
-            model_kwargs={"attn_implementation": "flash_attention_2"}# Always use float16 for speed
+            
         )
         print("Ultravox pipeline loaded successfully.")
     except Exception as e:
@@ -45,7 +45,7 @@ def initialize_models():
                 trust_remote_code=True,
                 device_map="auto",
                 torch_dtype=torch.float32,
-                model_kwargs={"attn_implementation": "flash_attention_2"}
+                
             )
             print("Ultravox pipeline loaded successfully (float32 fallback).")
         except Exception as e2:
