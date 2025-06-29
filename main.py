@@ -7,17 +7,15 @@ import gradio as gr
 from transformers import pipeline # Use pipeline for Ultravox
 from chatterbox.tts import ChatterboxTTS # Ensure this import is here
 
-# 1. Ultravox pipeline
+# 1. Ultravox pipeline - FIXED
 try:
     print(f"Using device: {'cuda:0' if torch.cuda.is_available() else 'cpu'}")
 
-    # Load the Ultravox model using the pipeline
-    # This is the intended way to use fixie-ai/ultravox-v0_4
+    # Load the Ultravox model using the pipeline - NO TASK SPECIFIED
+    # This is the correct way according to the official documentation
     uv_pipe = pipeline(
-        task="audio-text-to-text", # This is the custom task name
         model="fixie-ai/ultravox-v0_4",
         trust_remote_code=True,
-        revision="main",
         device_map="auto", # Let pipeline handle device placement
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
     )
@@ -25,8 +23,6 @@ try:
 
 except Exception as e:
     print(f"Error loading Ultravox pipeline: {e}")
-    print("This error often means the custom 'audio-text-to-text' task isn't registered.")
-    print("Try deleting ~/.cache/huggingface/modules and ~/.cache/huggingface/transformers and retrying.")
     exit()
 
 # 2. Chatterbox TTS loader (no changes needed here, it works)
@@ -46,7 +42,7 @@ class TTS:
         self.load()
         if not text.strip(): # Handle empty text
             print("Warning: Received empty text for TTS, returning empty audio.")
-            tmp = tempfile.NamedTem(suffix=".wav", delete=False)
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             torchaudio.save(tmp.name, torch.zeros(1, 16000), 16000)
             return tmp.name
 
@@ -64,7 +60,7 @@ class TTS:
 
 tts = TTS()
 
-# 3. Speech-to-speech function
+# 3. Speech-to-speech function - UPDATED FOR CORRECT API
 def s2s(audio_path: str) -> str:
     if audio_path is None:
         print("No audio input received yet. Waiting for user interaction.")
@@ -74,22 +70,35 @@ def s2s(audio_path: str) -> str:
     audio, sr = librosa.load(audio_path, sr=16000)
     print(f"Audio loaded with sample rate: {sr}")
 
-    # The pipeline handles the conversation turns as well.
-    # The 'Please respond to my speech input.' phrasing here is from Ultravox's own pipeline examples.
+    # The correct format according to Ultravox documentation
     turns = [
-        {"role": "system", "content": "You are a helpful voice assistant."},
-        {"role": "user", "content": "Please respond to my speech input."}
+        {
+            "role": "system",
+            "content": "You are a friendly and helpful voice assistant. Respond naturally and conversationally."
+        }
     ]
     print("Conversation turns prepared for pipeline.")
 
-    # Pass audio and turns to the pipeline
-    # The pipeline function handles internal processing (ASR, LLM inference, and integrating audio)
-    result = uv_pipe(
-        {"audio": audio, "turns": turns}, # Sampling rate handled by pipeline automatically
-        max_new_tokens=128
-    )
-    # The result from the pipeline is typically a list of dictionaries
-    response_text = result[0]["generated_text"]
+    # Pass audio, turns, and sampling_rate to the pipeline
+    # This is the correct API according to the official documentation
+    result = uv_pipe({
+        'audio': audio, 
+        'turns': turns, 
+        'sampling_rate': sr
+    }, max_new_tokens=128)
+    
+    # Extract the response text from the result
+    response_text = result
+    if isinstance(result, list) and len(result) > 0:
+        if isinstance(result[0], dict) and "generated_text" in result[0]:
+            response_text = result[0]["generated_text"]
+        else:
+            response_text = str(result[0])
+    elif isinstance(result, dict) and "generated_text" in result:
+        response_text = result["generated_text"]
+    else:
+        response_text = str(result)
+    
     print(f"Generated text response from pipeline: {response_text}")
 
     # Clean up memory
