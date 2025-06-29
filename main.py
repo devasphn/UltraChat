@@ -31,28 +31,26 @@ def initialize_models():
             model="fixie-ai/ultravox-v0_4",
             trust_remote_code=True,
             device_map="auto",
-            torch_dtype=torch.float16,  # Always use float16 for speed
-            model_kwargs={
-                "attn_implementation": "flash_attention_2",  # Use flash attention if available
-                "use_cache": True,
-                "low_cpu_mem_usage": True,
-            }
+            torch_dtype=torch.float16,
+            model_kwargs={"attn_implementation": "flash_attention_2"}# Always use float16 for speed
         )
         print("Ultravox pipeline loaded successfully.")
     except Exception as e:
         print(f"Error loading Ultravox pipeline: {e}")
-        # Fallback without flash attention
-        uv_pipe = pipeline(
-            model="fixie-ai/ultravox-v0_4",
-            trust_remote_code=True,
-            device_map="auto",
-            torch_dtype=torch.float16,
-            model_kwargs={
-                "use_cache": True,
-                "low_cpu_mem_usage": True,
-            }
-        )
-        print("Ultravox pipeline loaded successfully (fallback mode).")
+        # Fallback to CPU or different precision
+        try:
+            print("Trying fallback with float32...")
+            uv_pipe = pipeline(
+                model="fixie-ai/ultravox-v0_4",
+                trust_remote_code=True,
+                device_map="auto",
+                torch_dtype=torch.float32,
+                model_kwargs={"attn_implementation": "flash_attention_2"}
+            )
+            print("Ultravox pipeline loaded successfully (float32 fallback).")
+        except Exception as e2:
+            print(f"Fallback also failed: {e2}")
+            exit(1)
     
     # 2. Load Chatterbox TTS
     try:
