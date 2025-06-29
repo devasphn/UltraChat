@@ -311,9 +311,7 @@ def main():
         inbrowser=False,
         quiet=True,
         show_error=True,
-        server_kwargs={
-            "threaded": True,
-        }
+        
     )
 
 if __name__ == "__main__":
